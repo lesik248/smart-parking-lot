@@ -2,7 +2,7 @@ name: deploy
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
@@ -51,12 +51,12 @@ jobs:
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
 
           scp -i ~/.ssh/deploy_key docker-compose.prod.yml \
-            "$SSH_USER@$SSH_HOST:~/parking/docker-compose.yml"
+            "$SSH_USER@$SSH_HOST:~/smart-parking-lot/docker-compose.yml"
 
           ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" bash -s <<REMOTE
           set -e
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          cd ~/parking
+          cd ~/smart-parking-lot
           export IMAGE="$IMAGE:latest"
           docker compose pull
           docker compose up -d
