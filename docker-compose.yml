@@ -1,6 +1,6 @@
 services:
   parking-api:
-    build: .
+    image: ${IMAGE}
     ports:
       - "8000:8000"
     environment:
@@ -11,3 +11,4 @@ services:
 
 volumes:
   parking_db:
+
