@@ -1,158 +1,188 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from datetime import datetime
+import os
 import sqlite3
-import pickle
+from datetime import datetime
+from pathlib import Path
+
+import mlflow
+import mlflow.sklearn
 import pandas as pd
-import holidays
-import numpy as np
-
-with open("model/parking-model.pkl", "rb") as f:
-    model = pickle.load(f)
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 
-FEATURE_COLUMNS = [
-    "max_capacity", "hour", "day_of_week", "month",
-    "is_holiday", "is_weekend",
-    "lon", "lat", "dist_to_center",
-    "occupancy_mean", "occupancy_max",
-    "occupancy_lag1", "occupancy_lag2",
-    "occupancy_dayofweek_mean"
+# --------------------------------------------------
+# Configuration
+# --------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+
+DB_PATH = Path(
+    os.getenv("PARKING_DB_PATH", str(BASE_DIR / "data" / "parking_lots.db"))
+)
+
+MLFLOW_TRACKING_URI = os.getenv(
+    "MLFLOW_TRACKING_URI",
+    f"sqlite:///{BASE_DIR / 'mlflow.db'}",
+)
+
+MODEL_NAME = "parking-occupancy-model"
+MODEL_URI = os.getenv(
+    "MODEL_URI",
+    f"models:/{MODEL_NAME}@champion",
+)
+
+# The exact features used to train the model.
+EXPECTED_FEATURES = [
+    "max_capacity",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "lon",
+    "lat",
 ]
 
-app = FastAPI(title="Parking API")
 
-class CurrentRequest(BaseModel):
-    id_park: str
+# --------------------------------------------------
+# Load model from MLflow
+# --------------------------------------------------
+
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+model = mlflow.sklearn.load_model(MODEL_URI)
+
+if not hasattr(model, "feature_names_in_"):
+    raise RuntimeError(
+        "The registered model does not contain feature_names_in_. "
+        "Retrain and register the model using a pandas DataFrame."
+    )
+
+FEATURE_COLUMNS = list(model.feature_names_in_)
+
+if set(FEATURE_COLUMNS) != set(EXPECTED_FEATURES):
+    raise RuntimeError(
+        "The registered model uses unexpected features.\n"
+        f"Expected: {EXPECTED_FEATURES}\n"
+        f"Found: {FEATURE_COLUMNS}"
+    )
+
+
+# --------------------------------------------------
+# FastAPI
+# --------------------------------------------------
+
+app = FastAPI(
+    title="Parking Occupancy Prediction API",
+    description="Predict parking occupancy using an MLflow model.",
+    version="1.0.0",
+)
 
 
 class PredictRequest(BaseModel):
     id_park: str
     timestamp: datetime
 
-def get_db_connection():
-    return sqlite3.connect("data/parking_lots.db", detect_types=sqlite3.PARSE_DECLTYPES)
 
-center_lat = 38.71340301220318
-center_lon = -9.138537246528323
-
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371  # km
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi = np.radians(lat2 - lat1)
-    dlambda = np.radians(lon2 - lon1)
-
-    a = np.sin(dphi/2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda/2)**2
-    return 2 * R * np.arcsin(np.sqrt(a))
+# --------------------------------------------------
+# Database
+# --------------------------------------------------
 
 def get_parking_parameters(id_park: str):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    """Get static characteristics of a parking lot."""
 
-    cursor.execute("""
-        SELECT max_capacity, lon, lat, occupancy_mean, occupancy_max
-        FROM lot_parameters
-        WHERE id = ?
-    """, (id_park,))
+    if not DB_PATH.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Parking database not found: {DB_PATH}",
+        )
 
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+
+            row = conn.execute(
+                """
+                SELECT max_capacity, lon, lat
+                FROM lot_parameters
+                WHERE id = ?
+                """,
+                (id_park,),
+            ).fetchone()
+
+    except sqlite3.Error as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not read parking database: {exc}",
+        ) from exc
 
     if row is None:
-        return None
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown parking ID: {id_park}",
+        )
 
-    max_capacity, lon, lat, occ_mean, occ_max = row
+    params = dict(row)
 
-    # compute distance dynamically
-    dist_to_center = haversine(lat, lon, center_lat, center_lon)
+    if any(params[column] is None for column in (
+        "max_capacity", "lon", "lat"
+    )):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing parking parameters for {id_park}",
+        )
 
+    return params
+
+
+# --------------------------------------------------
+# Health and model information
+# --------------------------------------------------
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/model-info")
+def model_info():
     return {
-        "max_capacity": max_capacity,
-        "lon": lon,
-        "lat": lat,
-        "dist_to_center": dist_to_center,
-        "occupancy_mean": occ_mean,
-        "occupancy_max": occ_max
+        "model_uri": MODEL_URI,
+        "features": FEATURE_COLUMNS,
     }
 
-def get_last_occupancies(id_park: str):
-    conn = get_db_connection()
-    cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT occupancy
-        FROM parking_data
-        WHERE lot_id = ?
-        ORDER BY timestamp DESC
-        LIMIT 2
-    """, (id_park,))
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    if len(rows) < 1:
-        return None
-
-    lag1 = rows[0][0]
-    lag2 = rows[1][0] if len(rows) > 1 else lag1
-
-    return {"lag1": lag1, "lag2": lag2}
-
-@app.post("/current_occupancy")
-def current_occupancy(req: CurrentRequest):
-
-    lags = get_last_occupancies(req.id_park)
-    if lags is None:
-        return {"error": "No occupancy data for this parking lot"}
-
-    return {
-        "id_park": req.id_park,
-        "current_occupancy": lags["lag1"]
-    }
+# --------------------------------------------------
+# Prediction
+# --------------------------------------------------
 
 @app.post("/predict_occupancy")
 def predict_occupancy(req: PredictRequest):
+    """Predict occupancy for a parking lot at a given time."""
 
     params = get_parking_parameters(req.id_park)
-    if params is None:
-        return {"error": "Unknown parking id"}
-
-    lags = get_last_occupancies(req.id_park)
-    if lags is None:
-        return {"error": "Not enough occupancy history for prediction"}
-
     ts = req.timestamp
-    hour = ts.hour
-    dow = ts.weekday()
-    month = ts.month
 
-    pt_holidays = holidays.Portugal()
-    is_holiday = int(ts.date() in pt_holidays)
-    is_weekend = int(dow >= 5)
-
+    # Create exactly the same features as during training.
     features = {
         "max_capacity": params["max_capacity"],
-        "hour": hour,
-        "day_of_week": dow,
-        "month": month,
-        "is_holiday": is_holiday,
-        "is_weekend": is_weekend,
+        "hour": ts.hour,
+        "day_of_week": ts.weekday(),
+        "month": ts.month,
+        "is_weekend": int(ts.weekday() >= 5),
         "lon": params["lon"],
         "lat": params["lat"],
-        "dist_to_center": params["dist_to_center"],  # computed!
-        "occupancy_mean": params["occupancy_mean"],
-        "occupancy_max": params["occupancy_max"],
-        "occupancy_lag1": lags["lag1"],
-        "occupancy_lag2": lags["lag2"],
-        "occupancy_dayofweek_mean": params["occupancy_mean"],
     }
 
-    df = pd.DataFrame([features])[FEATURE_COLUMNS]
-    pred = model.predict(df)[0]
+    # Keep the exact feature order expected by the registered model.
+    X = pd.DataFrame(
+        [[features[column] for column in FEATURE_COLUMNS]],
+        columns=FEATURE_COLUMNS,
+    )
+
+    prediction = float(model.predict(X)[0])
 
     return {
         "id_park": req.id_park,
-        "timestamp": req.timestamp,
-        "predicted_occupancy": round(float(pred), 2)
+        "timestamp": ts.isoformat(),
+        "predicted_occupancy": round(prediction, 2),
     }
