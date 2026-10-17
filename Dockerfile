@@ -10,7 +10,7 @@ ENV PARKING_DB_PATH=/data/parking_lots.db
 ENV MODEL_PATH=/app/model
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -v -r requirements.txt
 
 COPY app/ ./app/
 COPY model/ ./model/

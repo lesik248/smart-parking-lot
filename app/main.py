@@ -24,6 +24,16 @@ MODEL_PATH = Path(
 model = mlflow.sklearn.load_model(str(MODEL_PATH))
 FEATURE_COLUMNS = list(model.feature_names_in_)
 
+try:
+    _info = mlflow.models.get_model_info(str(MODEL_PATH))
+    MODEL_METADATA = {
+        "model_uuid": getattr(_info, "model_uuid", None),
+        "mlflow_version": getattr(_info, "mlflow_version", None),
+        "created_utc": getattr(_info, "utc_time_created", None),
+    }
+except Exception:
+    MODEL_METADATA = {}
+
 # The exact features used to train the model.
 EXPECTED_FEATURES = [
     "max_capacity",
@@ -130,8 +140,9 @@ def health():
 @app.get("/model-info")
 def model_info():
     return {
-        "model_uri": MODEL_URI,
+        "model_path": str(MODEL_PATH),
         "features": FEATURE_COLUMNS,
+        **MODEL_METADATA,
     }
 
 
