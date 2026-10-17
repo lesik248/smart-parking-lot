@@ -2,6 +2,8 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/lesik248/smart-parking-lot"
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PARKING_DB_PATH=/data/parking_lots.db

@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t parking-api:ci .
+
+      - name: Smoke test (container starts and serves /docs)
+        run: |
+          docker run -d --name api -p 8000:8000 parking-api:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/docs > /dev/null; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not start. Container logs:"
+          docker logs api
+          exit 1
