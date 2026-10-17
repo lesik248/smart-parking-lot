@@ -57,7 +57,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
             'mkdir -p ~/smart-parking-lot'
 
-          scp -i ~/.ssh/deploy_key docker-compose.prod.yml \
+          scp -i ~/.ssh/deploy_key docker-compose.yml \
             "$SSH_USER@$SSH_HOST:~/smart-parking-lot/docker-compose.yml"
 
           ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
