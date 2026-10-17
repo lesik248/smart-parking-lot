@@ -1,0 +1,14 @@
+services:
+  parking-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PARKING_DB_PATH: /data/parking_lots.db
+      MODEL_PATH: /app/model
+    volumes:
+      - parking_db:/data
+    restart: unless-stopped
+
+volumes:
+  parking_db:
