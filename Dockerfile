@@ -2,13 +2,15 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/lesik248/smart-parking-lot"
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PARKING_DB_PATH=/data/parking_lots.db
 ENV MODEL_PATH=/app/model
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -v -r requirements.txt
 
 COPY app/ ./app/
 COPY model/ ./model/

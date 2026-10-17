@@ -10,26 +10,29 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 
 DB_PATH = Path(
-    os.getenv("PARKING_DB_PATH", str(BASE_DIR / "data" / "parking_lots.db"))
+    os.getenv("PARKING_DB_PATH", str(PROJECT_ROOT / "data" / "parking_lots.db"))
 )
 
-MLFLOW_TRACKING_URI = os.getenv(
-    "MLFLOW_TRACKING_URI",
-    f"sqlite:///{BASE_DIR / 'mlflow.db'}",
+MODEL_PATH = Path(
+    os.getenv("MODEL_PATH", str(PROJECT_ROOT / "model"))
 )
 
-MODEL_NAME = "parking-occupancy-model"
-MODEL_URI = os.getenv(
-    "MODEL_URI",
-    f"models:/{MODEL_NAME}@champion",
-)
+model = mlflow.sklearn.load_model(str(MODEL_PATH))
+FEATURE_COLUMNS = list(model.feature_names_in_)
+
+try:
+    _info = mlflow.models.get_model_info(str(MODEL_PATH))
+    MODEL_METADATA = {
+        "model_uuid": getattr(_info, "model_uuid", None),
+        "mlflow_version": getattr(_info, "mlflow_version", None),
+        "created_utc": getattr(_info, "utc_time_created", None),
+    }
+except Exception:
+    MODEL_METADATA = {}
 
 # The exact features used to train the model.
 EXPECTED_FEATURES = [
@@ -41,15 +44,6 @@ EXPECTED_FEATURES = [
     "lon",
     "lat",
 ]
-
-
-# --------------------------------------------------
-# Load model from MLflow
-# --------------------------------------------------
-
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-
-model = mlflow.sklearn.load_model(MODEL_URI)
 
 if not hasattr(model, "feature_names_in_"):
     raise RuntimeError(
@@ -146,8 +140,9 @@ def health():
 @app.get("/model-info")
 def model_info():
     return {
-        "model_uri": MODEL_URI,
+        "model_path": str(MODEL_PATH),
         "features": FEATURE_COLUMNS,
+        **MODEL_METADATA,
     }
 
 
