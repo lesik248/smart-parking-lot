@@ -1,0 +1,119 @@
+# ---------- 1. Swap ----------
+- name: Выключить swap сейчас
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Убрать swap из автозагрузки
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+# ---------- 2. Ядро и сеть ----------
+- name: Модули ядра — загружать при старте
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Модули ядра — загрузить сейчас
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Сетевые параметры для Kubernetes
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: true
+  loop:
+    - net.ipv4.ip_forward
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+
+# ---------- 3. containerd ----------
+- name: Базовые пакеты
+  ansible.builtin.apt:
+    name: [apt-transport-https, ca-certificates, curl, gpg]
+    update_cache: true
+
+- name: Каталог для ключей репозиториев
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Ключ репозитория Docker
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Репозиторий Docker
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    filename: docker
+
+- name: Установить containerd
+  ansible.builtin.apt:
+    name: containerd.io
+    update_cache: true
+
+- name: Создать конфиг containerd по умолчанию
+  ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/config.toml.k8s
+  notify: Restart containerd
+
+- name: Пометить, что конфиг уже создан нами
+  ansible.builtin.file:
+    path: /etc/containerd/config.toml.k8s
+    state: touch
+    modification_time: preserve
+    access_time: preserve
+
+- name: Включить systemd cgroup driver
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+
+- name: containerd запущен и в автозагрузке
+  ansible.builtin.service:
+    name: containerd
+    state: started
+    enabled: true
+
+# ---------- 4. Kubernetes ----------
+- name: Ключ репозитория Kubernetes
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes.asc
+    mode: "0644"
+
+- name: Репозиторий Kubernetes
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes.asc] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+    filename: kubernetes
+
+- name: Установить kubelet, kubeadm, kubectl
+  ansible.builtin.apt:
+    name: [kubelet, kubeadm, kubectl]
+    update_cache: true
+
+- name: Запретить автообновление этих пакетов
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+- name: kubelet в автозагрузке
+  ansible.builtin.service:
+    name: kubelet
+    enabled: true

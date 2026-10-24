@@ -1,0 +1,4 @@
+- name: Подключиться к кластеру
+  ansible.builtin.command: "{{ hostvars['master'].join_command }} --node-name={{ inventory_hostname }}"
+  args:
+    creates: /etc/kubernetes/kubelet.conf

@@ -5,3 +5,15 @@ mlruns
 mlflow.db
 mlruns
 .DS_store
+.vscode
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+# генерируется при развёртывании
+infra/ansible/inventory.ini
+infra/ansible/kubeconfig

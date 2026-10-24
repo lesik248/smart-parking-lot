@@ -1,8 +1,10 @@
-name: deploy
+name: build
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
+    paths-ignore:
+      - "infra/**"
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
   packages: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,39 +38,3 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Deploy to EC2 over SSH
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          SSH_HOST: ${{ secrets.EC2_HOST }}
-          SSH_USER: ${{ secrets.EC2_USER }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
-          scp -i ~/.ssh/deploy_key docker-compose.prod.yml \
-            "$SSH_USER@$SSH_HOST:~/parking/docker-compose.yml"
-
-          ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" bash -s <<REMOTE
-          set -e
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          cd ~/parking
-          export IMAGE="$IMAGE:latest"
-          docker compose pull
-          docker compose up -d
-          docker image prune -f
-          for i in \$(seq 1 30); do
-            if curl -sf http://localhost:8000/health > /dev/null; then
-              echo "API is healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "API did not become healthy. Logs:"
-          docker compose logs --tail 50
-          exit 1
-          REMOTE

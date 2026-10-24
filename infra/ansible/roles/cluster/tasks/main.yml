@@ -1,0 +1,25 @@
+- name: Метка role для nodeSelector
+  ansible.builtin.command: >
+    kubectl label node {{ item }} role={{ hostvars[item].node_role }} --overwrite
+  loop: "{{ groups['workers'] }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: role_label
+  changed_when: "'not labeled' not in role_label.stdout"
+
+- name: Метка для колонки ROLES
+  ansible.builtin.command: >
+    kubectl label node {{ item }} node-role.kubernetes.io/{{ hostvars[item].node_role }}= --overwrite
+  loop: "{{ groups['workers'] }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: display_label
+  changed_when: "'not labeled' not in display_label.stdout"
+
+- name: Установить local-path-provisioner
+  ansible.builtin.command: >
+    kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.31/deploy/local-path-storage.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: local_path
+  changed_when: "'created' in local_path.stdout or 'configured' in local_path.stdout"

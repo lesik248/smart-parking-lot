@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: parking
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: parking
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      nodeSelector:
+        role: app          # ← на worker-app, где есть IAM-роль для S3
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v3.17.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              pip install --no-cache-dir "psycopg[binary]" boto3 &&
+              exec mlflow server \
+                --host 0.0.0.0 \
+                --port 5000 \
+                --workers 1 \
+                --backend-store-uri "$BACKEND_STORE_URI" \
+                --artifacts-destination "s3://$MLFLOW_BUCKET/artifacts" \
+                --serve-artifacts \
+                --allowed-hosts "mlflow:5000,mlflow.parking.svc.cluster.local:5000,localhost:5000,localhost:5001,127.0.0.1:5000,127.0.0.1:5001"
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: POSTGRES_USER }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: POSTGRES_PASSWORD }
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: POSTGRES_DB }
+            - name: BACKEND_STORE_URI
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - name: MLFLOW_BUCKET
+              value: k8s-lab-mlflow-527557823764
+            - name: AWS_DEFAULT_REGION
+              value: eu-north-1
+            - name: MLFLOW_SERVER_ENABLE_JOB_EXECUTION
+              value: "false"
+          ports:
+            - containerPort: 5000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+              httpHeaders:
+                - name: Host
+                  value: localhost:5000
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+              httpHeaders:
+                - name: Host
+                  value: localhost:5000
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1536Mi
