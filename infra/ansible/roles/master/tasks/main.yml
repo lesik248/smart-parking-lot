@@ -1,0 +1,57 @@
+- name: Инициализировать кластер
+  ansible.builtin.command: >
+    kubeadm init
+    --apiserver-advertise-address={{ private_ip }}
+    --apiserver-cert-extra-sans={{ ansible_host }}
+    --pod-network-cidr=10.244.0.0/16
+    --node-name={{ inventory_hostname }}
+  args:
+    creates: /etc/kubernetes/admin.conf
+
+- name: Каталог .kube для пользователя ubuntu
+  ansible.builtin.file:
+    path: /home/ubuntu/.kube
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: kubeconfig для пользователя ubuntu
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/ubuntu/.kube/config
+    remote_src: true
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+
+- name: Установить сетевой плагин Flannel
+  ansible.builtin.command: >
+    kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: flannel
+  changed_when: "'created' in flannel.stdout or 'configured' in flannel.stdout"
+
+- name: Получить команду подключения воркеров
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: join_cmd
+  changed_when: false
+
+- name: Запомнить команду подключения
+  ansible.builtin.set_fact:
+    join_command: "{{ join_cmd.stdout }}"
+
+- name: Скачать kubeconfig на ноутбук
+  ansible.builtin.fetch:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ playbook_dir }}/kubeconfig"
+    flat: true
+
+- name: Прописать в kubeconfig публичный адрес master
+  ansible.builtin.replace:
+    path: "{{ playbook_dir }}/kubeconfig"
+    regexp: 'server: https://.*:6443'
+    replace: "server: https://{{ ansible_host }}:6443"
+  delegate_to: localhost
+  become: false

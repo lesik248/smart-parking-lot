@@ -1,0 +1,23 @@
+- name: Базовая подготовка всех нод
+  hosts: all
+  become: true
+  roles:
+    - common
+
+- name: Инициализация master
+  hosts: master
+  become: true
+  roles:
+    - master
+
+- name: Подключение воркеров
+  hosts: workers
+  become: true
+  roles:
+    - worker
+
+- name: Настройка кластера
+  hosts: master
+  become: true
+  roles:
+    - cluster

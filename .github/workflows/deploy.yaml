@@ -3,6 +3,8 @@ name: deploy
 on:
   push:
     branches: [dev]
+    paths-ignore:
+      - "infra/**"
   workflow_dispatch:
 
 permissions:

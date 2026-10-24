@@ -8,3 +8,4 @@ optuna
 mlflow
 fastapi
 uvicorn[standard]
+
