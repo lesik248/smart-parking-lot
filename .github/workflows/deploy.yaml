@@ -1,4 +1,4 @@
-name: deploy
+name: build
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   packages: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,51 +38,3 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      
-      - name: Deploy to EC2 over SSH
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          SSH_HOST: ${{ secrets.EC2_HOST }}
-          SSH_USER: ${{ secrets.EC2_USER }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
-          IMAGE: ${{ env.IMAGE }}
-        run: |
-          set -euo pipefail
-
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
-          ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
-            'mkdir -p ~/smart-parking-lot'
-
-          scp -i ~/.ssh/deploy_key docker-compose.yml \
-            "$SSH_USER@$SSH_HOST:~/smart-parking-lot/docker-compose.yml"
-
-          ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
-            "export IMAGE='$IMAGE:latest' && bash -s" <<REMOTE
-          set -e
-          cd ~/smart-parking-lot
-
-          echo "$GHCR_TOKEN" | docker login ghcr.io \
-            -u "$GHCR_USER" --password-stdin
-
-          docker compose config
-          docker compose pull
-          docker compose up -d --no-build
-
-          for i in \$(seq 1 30); do
-            if curl -sf http://localhost:8000/health > /dev/null; then
-              echo "API is healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-
-          echo "API did not become healthy. Logs:"
-          docker compose logs --tail 50
-          exit 1
-          REMOTE
