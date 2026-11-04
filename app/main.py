@@ -9,6 +9,10 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import logging
+import psycopg
+from psycopg.rows import dict_row
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -176,8 +180,89 @@ def predict_occupancy(req: PredictRequest):
 
     prediction = float(model.predict(X)[0])
 
+    log_prediction(req.id_park, ts, prediction)
     return {
         "id_park": req.id_park,
         "timestamp": ts.isoformat(),
         "predicted_occupancy": round(prediction, 2),
     }
+
+# --------------------------------------------------
+# Prediction log (PostgreSQL / RDS)
+# --------------------------------------------------
+
+DATABASE_URL = os.getenv("DATABASE_URL")  # если не задан, журнал отключён
+logger = logging.getLogger("uvicorn.error")
+
+CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS predictions (
+    id                  BIGSERIAL PRIMARY KEY,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id_park             TEXT NOT NULL,
+    target_ts           TIMESTAMP NOT NULL,
+    predicted_occupancy DOUBLE PRECISION NOT NULL,
+    model_uuid          TEXT
+)
+"""
+
+
+def db_connect():
+    conn = psycopg.connect(DATABASE_URL, connect_timeout=3, row_factory=dict_row)
+    conn.execute(CREATE_TABLE_SQL)
+    return conn
+
+
+def log_prediction(id_park: str, target_ts: datetime, prediction: float):
+    """Save a prediction; never break the API if the database is unavailable."""
+    if not DATABASE_URL:
+        return
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO predictions (id_park, target_ts, predicted_occupancy, model_uuid)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (id_park, target_ts, prediction, MODEL_METADATA.get("model_uuid")),
+            )
+    except psycopg.Error as exc:
+        logger.warning("Could not log prediction: %s", exc)
+
+
+def query_log(sql: str, params: tuple = ()):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Prediction log is disabled")
+    try:
+        with db_connect() as conn:
+            return conn.execute(sql, params).fetchall()
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail=f"Database error: {exc}") from exc
+
+@app.get("/predictions")
+def recent_predictions(limit: int = 20):
+    """Latest logged predictions."""
+    return query_log(
+        """
+        SELECT created_at, id_park, target_ts, predicted_occupancy
+        FROM predictions
+        ORDER BY id DESC
+        LIMIT %s
+        """,
+        (min(limit, 100),),
+    )
+
+
+@app.get("/predictions/stats")
+def prediction_stats():
+    """Requests and average predicted occupancy per parking lot."""
+    return query_log(
+        """
+        SELECT id_park,
+               count(*)                                   AS requests,
+               round(avg(predicted_occupancy)::numeric, 2) AS avg_predicted,
+               max(created_at)                            AS last_request
+        FROM predictions
+        GROUP BY id_park
+        ORDER BY requests DESC
+        """
+    )

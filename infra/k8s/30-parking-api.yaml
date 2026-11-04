@@ -38,6 +38,11 @@ spec:
           env:
             - name: PARKING_DB_PATH
               value: /data/parking_lots.db
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: parking-db
+                  key: DATABASE_URL
           volumeMounts:
             - name: data
               mountPath: /data
