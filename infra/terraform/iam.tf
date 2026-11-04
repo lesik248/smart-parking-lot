@@ -36,3 +36,7 @@ resource "aws_iam_instance_profile" "mlflow" {
   name = "${var.project}-mlflow-profile"
   role = aws_iam_role.mlflow.name
 }
+
+data "aws_dynamodb_table" "parking_lots" {
+name = "k8s-lab-parking-lots"
+}
