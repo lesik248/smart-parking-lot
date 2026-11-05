@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-predict
+  namespace: parking
+spec:
+  backoffLimit: 1                  # при ошибке одна повторная попытка
+  ttlSecondsAfterFinished: 86400   # удалить завершённый Job через сутки
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        role: app                  # нужна IAM-роль worker-app
+      containers:
+        - name: batch-predict
+          image: ghcr.io/lesik248/smart-parking-lot:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "app.batch_predict"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: parking-db
+                  key: DATABASE_URL
+            - name: STATUS_TABLE
+              value: k8s-lab-parking-status
+            - name: AWS_REGION
+              value: eu-north-1
+            - name: DAYS
+              value: "7"
+          resources:
+            requests:
+              memory: 512Mi
+            limits:
+              memory: 1536Mi

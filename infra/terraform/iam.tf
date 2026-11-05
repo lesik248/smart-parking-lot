@@ -37,6 +37,16 @@ resource "aws_iam_instance_profile" "mlflow" {
   role = aws_iam_role.mlflow.name
 }
 
-data "aws_dynamodb_table" "parking_lots" {
-name = "k8s-lab-parking-lots"
+resource "aws_iam_role_policy" "status_dynamodb_read" {
+  name = "parking-status-read"
+  role = aws_iam_role.mlflow.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["dynamodb:Query"]
+      Resource = "arn:aws:dynamodb:eu-north-1:${data.aws_caller_identity.current.account_id}:table/k8s-lab-parking-status"
+    }]
+  })
 }

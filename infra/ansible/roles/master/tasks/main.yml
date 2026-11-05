@@ -55,3 +55,11 @@
     replace: "server: https://{{ ansible_host }}:6443"
   delegate_to: localhost
   become: false
+
+- name: Проверять сертификат API по постоянному имени
+  ansible.builtin.lineinfile:
+    path: "{{ playbook_dir }}/kubeconfig"
+    insertafter: '^\s*server: https://'
+    line: "    tls-server-name: kubernetes"
+  delegate_to: localhost
+  become: false
