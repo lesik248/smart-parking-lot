@@ -9,3 +9,4 @@ fastapi==0.143.3
 uvicorn==0.54.0
 psycopg[binary]
 boto3
+prometheus_client

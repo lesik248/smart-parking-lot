@@ -23,7 +23,7 @@ spec:
                   name: parking-db
                   key: DATABASE_URL
             - name: STATUS_TABLE
-              value: k8s-lab-parking-status
+              value: k8s-lab-occupancy-status
             - name: AWS_REGION
               value: eu-north-1
             - name: DAYS

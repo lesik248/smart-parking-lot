@@ -46,7 +46,7 @@ resource "aws_iam_role_policy" "status_dynamodb_read" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["dynamodb:Query"]
-      Resource = "arn:aws:dynamodb:eu-north-1:${data.aws_caller_identity.current.account_id}:table/k8s-lab-parking-status"
+      Resource = "arn:aws:dynamodb:eu-north-1:${data.aws_caller_identity.current.account_id}:table/k8s-lab-occupancy-status"
     }]
   })
 }
