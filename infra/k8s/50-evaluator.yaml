@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: evaluator
+  namespace: parking
+  labels:
+    app: evaluator
+spec:
+  selector:
+    app: evaluator
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evaluator
+  namespace: parking
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evaluator
+  template:
+    metadata:
+      labels:
+        app: evaluator
+    spec:
+      nodeSelector:
+        role: app            # IAM-роль worker-app: чтение DynamoDB
+      containers:
+        - name: evaluator
+          image: ghcr.io/lesik248/smart-parking-lot:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "app.evaluator"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: parking-db
+                  key: DATABASE_URL
+            - name: STATUS_TABLE
+              value: k8s-lab-occupancy-status
+            - name: AWS_REGION
+              value: eu-north-1
+            - name: EVAL_INTERVAL
+              value: "60"
+          ports:
+            - name: metrics
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8000
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
