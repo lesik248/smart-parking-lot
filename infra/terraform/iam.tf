@@ -50,3 +50,27 @@ resource "aws_iam_role_policy" "status_dynamodb_read" {
     }]
   })
 }
+
+resource "aws_iam_role_policy" "grafana_cloudwatch_read" {
+  name = "grafana-cloudwatch-read"
+  role = aws_iam_role.mlflow.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "cloudwatch:ListMetrics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmsForMetric",
+        "ec2:DescribeInstances",
+        "ec2:DescribeTags",
+        "ec2:DescribeRegions",
+        "tag:GetResources",
+      ]
+      Resource = "*"
+    }]
+  })
+}

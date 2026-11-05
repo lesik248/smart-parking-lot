@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+
+      - name: RDS
+        type: grafana-postgresql-datasource
+        uid: rds
+        url: ${RDS_HOST}:5432
+        user: grafana_ro
+        jsonData:
+          database: parking
+          sslmode: require
+          postgresVersion: 1500
+        secureJsonData:
+          password: ${RDS_GRAFANA_PASSWORD}
+
+      - name: CloudWatch
+        type: cloudwatch
+        uid: cloudwatch
+        jsonData:
+          authType: default
+          defaultRegion: eu-north-1
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: monitoring
+spec:
+  storageClassName: local-path
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # один диск ReadWriteOnce: старый под должен освободить его до старта нового
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      nodeSelector:
+        role: app           # IAM-роль worker-app для CloudWatch
+      securityContext:
+        fsGroup: 472        # Grafana работает от пользователя 472, ему нужна запись на диск
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.0.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: grafana-secrets, key: admin-password }
+            - name: RDS_HOST
+              valueFrom:
+                secretKeyRef: { name: grafana-secrets, key: rds-host }
+            - name: RDS_GRAFANA_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: grafana-secrets, key: rds-password }
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 10
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data
